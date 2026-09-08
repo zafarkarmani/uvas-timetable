@@ -63,7 +63,22 @@ The seed creates the 10 requested faculty records, four classrooms, two labs, BS
 ## Hostinger API configuration
 `api/config.php` exposes only the Supabase project URL and publishable browser key. A Supabase publishable key is intended for browser use when RLS is correctly configured. Never put a Supabase secret/service-role key in the repository.
 
-Gemini is optional. `api/gemini.php` reads `GEMINI_API_KEY` only from the server environment and never sends it to the browser. If it is not configured, the timetable's core scheduling functions continue to work and the AI endpoint returns a controlled 503 response.
+Gemini is optional. The Gemini API key is **not stored in GitHub** and is never sent to the browser. The Hostinger PHP endpoint first reads a private file outside the public website directory:
+
+`<account-root>/uvas-private/gemini.php`
+
+Create that file manually in Hostinger File Manager with:
+
+```php
+<?php
+return [
+    'GEMINI_API_KEY' => 'PASTE_YOUR_GEMINI_API_KEY_HERE'
+];
+```
+
+For the deployed site, the website root is normally inside the hosting account directory, so the application resolves this private file relative to `api/gemini.php`. Keep the `uvas-private` folder outside `public_html` and never commit the real key to GitHub.
+
+If the private file is absent or empty, Gemini returns a controlled 503 response and the core timetable system continues to work. Server environment variables are also supported as a fallback.
 
 ## Gemini assistant
 The browser sends natural-language requests to the local Hostinger PHP endpoint. Gemini converts the request into strict JSON actions. It cannot write timetable rows directly. The client resolves the action against current master data and validates any timetable mutation through the deterministic engine.
