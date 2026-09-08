@@ -11,10 +11,28 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     exit;
 }
 
-$key = getenv('GEMINI_API_KEY') ?: ($_SERVER['GEMINI_API_KEY'] ?? '');
-if (!$key) {
+/* Gemini key is kept outside the Git repository and public website directory.
+ * Create <account-root>/uvas-private/gemini.php on Hostinger with:
+ * <?php return ['GEMINI_API_KEY' => 'YOUR_KEY'];
+ * __DIR__ is <website-root>/api, so two levels up reaches the account root.
+ */
+$privateConfig = dirname(__DIR__, 2) . '/uvas-private/gemini.php';
+$key = '';
+if (is_file($privateConfig)) {
+    $config = require $privateConfig;
+    if (is_array($config)) {
+        $key = trim((string)($config['GEMINI_API_KEY'] ?? ''));
+    }
+}
+
+// Environment variables remain supported as a fallback.
+if ($key === '') {
+    $key = trim((string)(getenv('GEMINI_API_KEY') ?: ($_SERVER['GEMINI_API_KEY'] ?? '')));
+}
+
+if ($key === '') {
     http_response_code(503);
-    echo json_encode(['error' => 'Gemini AI is not configured on this Hostinger site. The core timetable system does not require Gemini.']);
+    echo json_encode(['error' => 'Gemini AI is not configured on this Hostinger site. Create the private uvas-private/gemini.php file with your Gemini API key. The core timetable system does not require Gemini.']);
     exit;
 }
 
