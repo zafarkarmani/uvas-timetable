@@ -1,0 +1,21 @@
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Backward-compatible routes for any cached copy of the old frontend.
+  RewriteRule ^\.netlify/functions/config$ api/config.php [L]
+  RewriteRule ^\.netlify/functions/gemini$ api/gemini.php [L]
+</IfModule>
+
+# Prevent accidental exposure of repository and local configuration files.
+<FilesMatch "^(\.env|\.git|\.gitignore|netlify\.toml|composer\.(json|lock))$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+</IfModule>
