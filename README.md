@@ -3,17 +3,18 @@
 Production-ready timetable management for **University of Veterinary & Animal Sciences, Ravi Campus, Pattoki, Department of Statistics and Computer Science**.
 
 ## Architecture
-- Static frontend: HTML/CSS/JavaScript
-- Cloud database/auth: Supabase
-- Hosting/serverless API: Netlify
+- Frontend: HTML/CSS/JavaScript
+- Host: Hostinger Premium Web Hosting
+- Hostinger API endpoints: PHP under `api/`
+- Database/auth: Supabase
 - Source of truth: GitHub `main`
-- AI: Gemini through a Netlify Function only
+- AI: optional Gemini endpoint through Hostinger PHP
 - Browser localStorage is not the production database
 
 ## Core scheduling rules
 - Monday–Friday
 - 11 periods per day, each exactly 50 minutes
-- Theory sessions: 1 or 2 consecutive slots
+- Theory sessions: 1, 2, or 3 consecutive slots
 - Labs: exactly 3 consecutive slots / 150 minutes
 - Teacher, section, room and lab overlaps are rejected
 - Teacher unavailable slots are hard constraints
@@ -21,11 +22,23 @@ Production-ready timetable management for **University of Veterinary & Animal Sc
 - Manual, automatic and AI timetable actions use the same deterministic validator
 - PostgreSQL exclusion constraints provide a second database-level protection against overlaps
 
+## Hostinger deployment
+This repository is prepared for Hostinger Custom PHP/HTML hosting.
+
+1. Create the website in Hostinger as **Custom PHP/HTML website**.
+2. Open **Dashboard → Advanced → Git**.
+3. Connect GitHub and select `zafarkarmani/uvas-timetable`.
+4. Deploy the `main` branch to the website root (`public_html`).
+5. Hostinger can manage the connected repository and deployment history from hPanel.
+6. After a new commit is pushed, use Hostinger's automatic deployment if enabled on the plan, or click **Redeploy** in the Git panel.
+
+Hostinger supports Git deployment for custom PHP and HTML/static projects on web hosting plans.
+
 ## Supabase setup
-1. Create a Supabase project.
+1. Create/use the Supabase project.
 2. Open SQL Editor.
 3. Run `supabase/schema.sql` completely.
-4. Run `supabase/production_patch.sql` completely. This adds the Auth-to-faculty link and lets teachers edit only their own preference grid.
+4. Run `supabase/production_patch.sql` completely.
 5. In Supabase Authentication, create the first administrator account.
 6. Promote it to admin:
 
@@ -47,24 +60,13 @@ New Auth users start as `teacher`. Promote committee/admin accounts from the `pr
 
 The seed creates the 10 requested faculty records, four classrooms, two labs, BS Computer Science Semesters I/III/V sections, the requested semester-wise courses, and eligible teacher mappings where the prompt supplied alternatives. Ambiguous courses are not given a single guessed final teacher.
 
-## Netlify environment variables
-Set these in Netlify Site configuration:
+## Hostinger API configuration
+`api/config.php` exposes only the Supabase project URL and publishable browser key. A Supabase publishable key is intended for browser use when RLS is correctly configured. Never put a Supabase secret/service-role key in the repository.
 
-```env
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-GEMINI_API_KEY=
-```
-
-The anonymous Supabase key is safe for browser use when RLS is correctly enabled. Never expose `SUPABASE_SERVICE_ROLE_KEY` or `GEMINI_API_KEY` to browser code. The service-role key is not required by this project.
-
-## Netlify deployment
-Connect this GitHub repository to Netlify and deploy the `main` branch. `netlify.toml` configures the static publish directory and `netlify/functions`.
-
-When Netlify GitHub integration is enabled, commits to `main` can trigger production deployments and pull requests can use deploy previews.
+Gemini is optional. `api/gemini.php` reads `GEMINI_API_KEY` only from the server environment and never sends it to the browser. If it is not configured, the timetable's core scheduling functions continue to work and the AI endpoint returns a controlled 503 response.
 
 ## Gemini assistant
-The browser calls `/.netlify/functions/gemini`. Gemini converts natural language into strict JSON actions. It cannot write timetable rows directly. The client resolves the action against current master data and validates any timetable mutation through the deterministic engine.
+The browser sends natural-language requests to the local Hostinger PHP endpoint. Gemini converts the request into strict JSON actions. It cannot write timetable rows directly. The client resolves the action against current master data and validates any timetable mutation through the deterministic engine.
 
 ## Course CSV
 Template:
@@ -78,7 +80,7 @@ The importer supports quoted CSV fields, checks required columns, skips duplicat
 ## Workflow
 1. Configure Supabase and create/promote the first admin.
 2. Run both SQL files.
-3. Configure Netlify environment variables.
+3. Deploy this repository to Hostinger.
 4. Sign in.
 5. Review faculty, programs, sections, courses and eligible teachers.
 6. Enter faculty preferred/available/unavailable periods.
