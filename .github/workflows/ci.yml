@@ -13,5 +13,9 @@ jobs:
         with:
           node-version: 22
       - run: node --check app.js
-      - run: node --check netlify/functions/config.js
-      - run: node --check netlify/functions/gemini.js
+      - run: node --check hostinger.js
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+      - run: php -l api/config.php
+      - run: php -l api/gemini.php
