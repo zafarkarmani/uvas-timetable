@@ -1,9 +1,7 @@
 create extension if not exists pgcrypto;
 create extension if not exists btree_gist;
-
 do $$ begin create type app_role as enum ('admin','committee','teacher'); exception when duplicate_object then null; end $$;
 do $$ begin create type preference_kind as enum ('preferred','available','unavailable'); exception when duplicate_object then null; end $$;
-
 create table if not exists profiles(id uuid primary key references auth.users(id) on delete cascade,full_name text not null default '',role app_role not null default 'teacher',active boolean not null default true,created_at timestamptz not null default now());
 create table if not exists faculty(id uuid primary key default gen_random_uuid(),name text not null unique,faculty_type text not null default 'DSCS',allocated_credit_hours numeric(5,2) not null default 0,max_weekly_slots int not null default 20,active boolean not null default true,created_at timestamptz not null default now());
 create table if not exists programs(id uuid primary key default gen_random_uuid(),name text not null unique,active boolean not null default true);
@@ -19,39 +17,43 @@ create table if not exists timetable_entries(id uuid primary key default gen_ran
 create table if not exists timetable_entry_slots(id uuid primary key default gen_random_uuid(),entry_id uuid not null references timetable_entries(id) on delete cascade,slot int not null check(slot between 0 and 10),unique(entry_id,slot));
 create table if not exists system_settings(key text primary key,value jsonb not null default '{}'::jsonb);
 create table if not exists audit_log(id uuid primary key default gen_random_uuid(),actor_id uuid references profiles(id) on delete set null,action text not null,entity_type text not null,entity_id uuid,previous_value jsonb,new_value jsonb,created_at timestamptz not null default now());
-
 create index if not exists timetable_entries_version_idx on timetable_entries(version_id);
 create index if not exists timetable_entries_day_idx on timetable_entries(day,start_slot);
 create index if not exists timetable_entries_course_idx on timetable_entries(course_id);
 create index if not exists timetable_entries_faculty_idx on timetable_entries(faculty_id);
 create index if not exists timetable_entries_section_idx on timetable_entries(section_id);
-
-alter table timetable_entries drop constraint if exists timetable_entries_teacher_no_overlap;
-alter table timetable_entries add constraint timetable_entries_teacher_no_overlap exclude using gist (faculty_id with =, day with =, slot_range with &&);
-alter table timetable_entries drop constraint if exists timetable_entries_section_no_overlap;
-alter table timetable_entries add constraint timetable_entries_section_no_overlap exclude using gist (section_id with =, day with =, slot_range with &&);
-alter table timetable_entries drop constraint if exists timetable_entries_room_no_overlap;
-alter table timetable_entries add constraint timetable_entries_room_no_overlap exclude using gist (room_id with =, day with =, slot_range with &&) where (room_id is not null);
-alter table timetable_entries drop constraint if exists timetable_entries_lab_no_overlap;
-alter table timetable_entries add constraint timetable_entries_lab_no_overlap exclude using gist (lab_id with =, day with =, slot_range with &&) where (lab_id is not null);
-
+alter table timetable_entries drop constraint if exists timetable_entries_teacher_no_overlap; alter table timetable_entries add constraint timetable_entries_teacher_no_overlap exclude using gist (faculty_id with =, day with =, slot_range with &&);
+alter table timetable_entries drop constraint if exists timetable_entries_section_no_overlap; alter table timetable_entries add constraint timetable_entries_section_no_overlap exclude using gist (section_id with =, day with =, slot_range with &&);
+alter table timetable_entries drop constraint if exists timetable_entries_room_no_overlap; alter table timetable_entries add constraint timetable_entries_room_no_overlap exclude using gist (room_id with =, day with =, slot_range with &&) where (room_id is not null);
+alter table timetable_entries drop constraint if exists timetable_entries_lab_no_overlap; alter table timetable_entries add constraint timetable_entries_lab_no_overlap exclude using gist (lab_id with =, day with =, slot_range with &&) where (lab_id is not null);
 create or replace function public.is_admin_or_committee() returns boolean language sql security definer set search_path=public as $$ select exists(select 1 from profiles where id=auth.uid() and role in ('admin','committee') and active) $$;
 create or replace function public.is_admin() returns boolean language sql security definer set search_path=public as $$ select exists(select 1 from profiles where id=auth.uid() and role='admin' and active) $$;
-
 alter table profiles enable row level security; alter table faculty enable row level security; alter table programs enable row level security; alter table semesters enable row level security; alter table sections enable row level security; alter table rooms enable row level security; alter table labs enable row level security; alter table courses enable row level security; alter table course_teacher_assignments enable row level security; alter table faculty_preferences enable row level security; alter table timetable_versions enable row level security; alter table timetable_entries enable row level security; alter table timetable_entry_slots enable row level security; alter table system_settings enable row level security; alter table audit_log enable row level security;
-
-do $$ declare t text; begin foreach t in array array['faculty','programs','semesters','sections','rooms','labs','courses','course_teacher_assignments','faculty_preferences','timetable_versions','timetable_entries','timetable_entry_slots','system_settings','audit_log'] loop execute format('drop policy if exists %I_read on %I',t,t); execute format('create policy %I_read on %I for select to authenticated using (true)',t,t); execute format('drop policy if exists %I_write on %I',t,t); execute format('create policy %I_write on %I for all to authenticated using (public.is_admin_or_committee()) with check (public.is_admin_or_committee())',t,t); end loop; end $$;
 drop policy if exists profiles_read on profiles; create policy profiles_read on profiles for select to authenticated using (id=auth.uid() or public.is_admin());
 drop policy if exists profiles_admin on profiles; create policy profiles_admin on profiles for all to authenticated using (public.is_admin()) with check (public.is_admin());
-
-create or replace function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$ begin insert into public.profiles(id,full_name,role) values(new.id,coalesce(new.raw_user_meta_data->>'full_name',''), 'teacher') on conflict(id) do nothing; return new; end $$;
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
-
-insert into programs(name) values ('BS Computer Science'),('BS BioTec'),('BS Zoology'),('MLT'),('Food Science'),('Poultry') on conflict(name) do nothing;
-insert into rooms(name,capacity) values ('Room 1',40),('Room 2',40),('Marketing Room',35),('Conference Room',30) on conflict(name) do nothing;
-insert into labs(name,capacity) values ('Lab 1',30),('Lab 2',30) on conflict(name) do nothing;
-insert into faculty(name,faculty_type,allocated_credit_hours,max_weekly_slots) values
-('Dr. Fareed Ahmad','DSCS',10,20),('Mr. Muhammad Zafar Iqbal Karmani','DSCS',17,20),('Mr. Anees Ahmad Zafar','DSCS',12,20),('Mr. Ali Raza Aslam','DSCS',18,20),('Ms. Hafsa Mehboob','DSCS',15,20),('Ms. Sofia','DSCS',15,20),('Mr. Shahid','Visiting',11,20),('Ms. Asia','Visiting',6,20),('Ms. Tahira','Visiting',9,20),('Mr. Abdullah','Visiting',4,20) on conflict(name) do update set faculty_type=excluded.faculty_type,allocated_credit_hours=excluded.allocated_credit_hours;
-
-insert into system_settings(key,value) values('scheduler', '{"max_consecutive_theory":3,"max_classes_per_day":5,"prefer_same_room":true,"allow_saturday":false,"allow_overload":false}'::jsonb) on conflict(key) do nothing;
+do $$ declare t text; begin foreach t in array array['faculty','programs','semesters','sections','rooms','labs','courses','course_teacher_assignments','faculty_preferences','timetable_versions','timetable_entries','timetable_entry_slots','system_settings','audit_log'] loop execute format('drop policy if exists %I_read on %I',t,t); execute format('create policy %I_read on %I for select to authenticated using (true)',t,t); execute format('drop policy if exists %I_write on %I',t,t); execute format('create policy %I_write on %I for all to authenticated using (public.is_admin_or_committee()) with check (public.is_admin_or_committee())',t,t); end loop; end $$;
+create or replace function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$ begin insert into public.profiles(id,full_name,role) values(new.id,coalesce(new.raw_user_meta_data->>'full_name',''),'teacher') on conflict(id) do nothing; return new; end $$;
+drop trigger if exists on_auth_user_created on auth.users; create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
+insert into programs(name) values('BS Computer Science'),('BS BioTec'),('BS Zoology'),('MLT'),('Food Science'),('Poultry') on conflict(name) do nothing;
+insert into rooms(name,capacity) values('Room 1',40),('Room 2',40),('Marketing Room',35),('Conference Room',30) on conflict(name) do nothing;
+insert into labs(name,capacity) values('Lab 1',30),('Lab 2',30) on conflict(name) do nothing;
+insert into faculty(name,faculty_type,allocated_credit_hours,max_weekly_slots) values('Dr. Fareed Ahmad','DSCS',10,20),('Mr. Muhammad Zafar Iqbal Karmani','DSCS',17,20),('Mr. Anees Ahmad Zafar','DSCS',12,20),('Mr. Ali Raza Aslam','DSCS',18,20),('Ms. Hafsa Mehboob','DSCS',15,20),('Ms. Sofia','DSCS',15,20),('Mr. Shahid','Visiting',11,20),('Ms. Asia','Visiting',6,20),('Ms. Tahira','Visiting',9,20),('Mr. Abdullah','Visiting',4,20) on conflict(name) do update set faculty_type=excluded.faculty_type,allocated_credit_hours=excluded.allocated_credit_hours;
+insert into semesters(program_id,name,sort_order) select id,'I',1 from programs where name='BS Computer Science' on conflict(program_id,name) do nothing;
+insert into semesters(program_id,name,sort_order) select id,'III',3 from programs where name='BS Computer Science' on conflict(program_id,name) do nothing;
+insert into semesters(program_id,name,sort_order) select id,'V',5 from programs where name='BS Computer Science' on conflict(program_id,name) do nothing;
+insert into sections(program_id,semester_id,name) select p.id,s.id,x.name from programs p join semesters s on s.program_id=p.id cross join (values('I','Morning'),('I','Evening A'),('I','Evening B'),('III','Morning'),('III','Evening'),('V','Morning A'),('V','Morning B'),('V','Evening')) x(sem,name) where p.name='BS Computer Science' and s.name=x.sem on conflict(program_id,semester_id,name) do nothing;
+insert into courses(course_code,course_title,program_id,semester_id,credit_hours,theory_hours,lab_hours) select x.code,x.title,p.id,s.id,x.ch,x.th,x.lab from (values('PF-I','Programming Fundamentals','I',3,3,0),('AICT-I','Applications of ICT','I',3,3,0),('DS-I','Discrete Structures','I',3,3,0),('CAL-I','Calculus and Analytic Geometry','I',3,3,0),('ENG-I','Functional English','I',3,3,0),('SS-I','Social Science I','I',2,2,0),('DS-III','Data Structures','III',3,3,0),('AI-III','Artificial Intelligence','III',3,3,0),('CN-III','Computer Networks','III',3,3,0),('SE-III','Software Engineering','III',3,3,0),('PHY-III','Applied Physics','III',3,3,0),('MVC-III','Multivariable Calculus','III',3,3,0),('OS-V','Operating Systems','V',3,3,0),('HCI-V','HCI & Computer Graphics','V',3,3,0),('CA-V','Computer Architecture','V',3,3,0),('ML-V','Machine Learning','V',3,3,0),('WEB-V','Web Technologies','V',3,3,0),('MGT-V','Introduction to Management','V',3,3,0)) x(code,title,sem,ch,th,lab) join programs p on p.name='BS Computer Science' join semesters s on s.program_id=p.id and s.name=x.sem on conflict(course_code) do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name in('Dr. Fareed Ahmad','Mr. Shahid') where c.course_code='PF-I' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name in('Mr. Anees Ahmad Zafar','Ms. Sofia','Mr. Shahid','Ms. Tahira') where c.course_code='AICT-I' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Mr. Ali Raza Aslam' where c.course_code='DS-I' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Mr. Muhammad Zafar Iqbal Karmani' where c.course_code='DS-III' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Ms. Sofia' where c.course_code='CN-III' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Ms. Hafsa Mehboob' where c.course_code='SE-III' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Ms. Asia' where c.course_code='PHY-III' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Mr. Ali Raza Aslam' where c.course_code='OS-V' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Ms. Hafsa Mehboob' where c.course_code='HCI-V' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Mr. Muhammad Zafar Iqbal Karmani' where c.course_code='CA-V' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name in('Dr. Fareed Ahmad','Ms. Tahira') where c.course_code='ML-V' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Mr. Anees Ahmad Zafar' where c.course_code='WEB-V' on conflict do nothing;
+insert into course_teacher_assignments(course_id,faculty_id) select c.id,f.id from courses c join faculty f on f.name='Mr. Abdullah' where c.course_code='MGT-V' on conflict do nothing;
+insert into system_settings(key,value) values('scheduler','{"max_consecutive_theory":3,"max_classes_per_day":5,"prefer_same_room":true,"allow_saturday":false,"allow_overload":false}'::jsonb) on conflict(key) do nothing;
