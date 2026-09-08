@@ -1,11 +1,57 @@
-create table if not exists teachers(id uuid primary key default gen_random_uuid(),name text not null,max_weekly_slots int default 12,active boolean default true);
-create table if not exists classes(id uuid primary key default gen_random_uuid(),name text not null,active boolean default true);
-create table if not exists rooms(id uuid primary key default gen_random_uuid(),name text not null,kind text not null check(kind in ('Theory','Lab')),active boolean default true);
-create table if not exists courses(id uuid primary key default gen_random_uuid(),name text not null,teacher_id uuid references teachers(id),type text not null check(type in ('Theory','Lab')),sessions_per_week int default 1,active boolean default true);
-create table if not exists teacher_unavailability(id uuid primary key default gen_random_uuid(),teacher_id uuid references teachers(id) on delete cascade,day text not null,slot int not null check(slot between 0 and 7));
-create table if not exists allocations(id uuid primary key default gen_random_uuid(),day text not null,start_slot int not null check(start_slot between 0 and 7),duration int not null check(duration between 1 and 3),course_id uuid references courses(id),teacher_id uuid references teachers(id),class_id uuid references classes(id),room_id uuid references rooms(id),type text not null check(type in ('Theory','Lab')),created_at timestamptz default now());
-create index if not exists allocations_day_slot_idx on allocations(day,start_slot);
-create index if not exists allocations_teacher_idx on allocations(teacher_id);
-create index if not exists allocations_class_idx on allocations(class_id);
-create index if not exists allocations_room_idx on allocations(room_id);
--- Enable RLS before production use. Create authenticated role policies appropriate to the department's workflow.
+create extension if not exists pgcrypto;
+create extension if not exists btree_gist;
+
+do $$ begin create type app_role as enum ('admin','committee','teacher'); exception when duplicate_object then null; end $$;
+do $$ begin create type preference_kind as enum ('preferred','available','unavailable'); exception when duplicate_object then null; end $$;
+
+create table if not exists profiles(id uuid primary key references auth.users(id) on delete cascade,full_name text not null default '',role app_role not null default 'teacher',active boolean not null default true,created_at timestamptz not null default now());
+create table if not exists faculty(id uuid primary key default gen_random_uuid(),name text not null unique,faculty_type text not null default 'DSCS',allocated_credit_hours numeric(5,2) not null default 0,max_weekly_slots int not null default 20,active boolean not null default true,created_at timestamptz not null default now());
+create table if not exists programs(id uuid primary key default gen_random_uuid(),name text not null unique,active boolean not null default true);
+create table if not exists semesters(id uuid primary key default gen_random_uuid(),program_id uuid references programs(id) on delete cascade,name text not null,sort_order int not null default 0,active boolean not null default true,unique(program_id,name));
+create table if not exists sections(id uuid primary key default gen_random_uuid(),program_id uuid references programs(id) on delete cascade,semester_id uuid references semesters(id) on delete cascade,name text not null,active boolean not null default true,unique(program_id,semester_id,name));
+create table if not exists rooms(id uuid primary key default gen_random_uuid(),name text not null unique,capacity int not null default 30,active boolean not null default true);
+create table if not exists labs(id uuid primary key default gen_random_uuid(),name text not null unique,capacity int not null default 30,active boolean not null default true);
+create table if not exists courses(id uuid primary key default gen_random_uuid(),course_code text not null unique,course_title text not null,program_id uuid references programs(id) on delete set null,semester_id uuid references semesters(id) on delete set null,credit_hours numeric(4,1) not null default 3,theory_hours numeric(4,1) not null default 3,lab_hours numeric(4,1) not null default 0,preferred_room_id uuid references rooms(id) on delete set null,preferred_lab_id uuid references labs(id) on delete set null,theory_duration_slots int not null default 1 check(theory_duration_slots in (1,2)),active boolean not null default true,created_at timestamptz not null default now());
+create table if not exists course_teacher_assignments(course_id uuid references courses(id) on delete cascade,faculty_id uuid references faculty(id) on delete cascade,primary key(course_id,faculty_id));
+create table if not exists faculty_preferences(id uuid primary key default gen_random_uuid(),faculty_id uuid references faculty(id) on delete cascade,day text not null check(day in ('Monday','Tuesday','Wednesday','Thursday','Friday')),slot int not null check(slot between 0 and 10),kind preference_kind not null,unique(faculty_id,day,slot));
+create table if not exists timetable_versions(id uuid primary key default gen_random_uuid(),name text not null,academic_session text not null default '2026-27',status text not null default 'draft' check(status in ('draft','final','archived')),locked boolean not null default false,created_by uuid references profiles(id) on delete set null,created_at timestamptz not null default now());
+create table if not exists timetable_entries(id uuid primary key default gen_random_uuid(),version_id uuid not null references timetable_versions(id) on delete cascade,course_id uuid not null references courses(id),faculty_id uuid not null references faculty(id),section_id uuid not null references sections(id),day text not null check(day in ('Monday','Tuesday','Wednesday','Thursday','Friday')),start_slot int not null check(start_slot between 0 and 10),duration_slots int not null check(duration_slots between 1 and 3),session_type text not null default 'Theory' check(session_type in ('Theory','Lab')),room_id uuid references rooms(id) on delete set null,lab_id uuid references labs(id) on delete set null,locked boolean not null default false,created_at timestamptz not null default now(),slot_range int4range generated always as (int4range(start_slot,start_slot+duration_slots,'[)')) stored,check((session_type='Lab' and duration_slots=3 and lab_id is not null and room_id is null) or (session_type='Theory' and duration_slots in (1,2) and room_id is not null and lab_id is null)));
+create table if not exists timetable_entry_slots(id uuid primary key default gen_random_uuid(),entry_id uuid not null references timetable_entries(id) on delete cascade,slot int not null check(slot between 0 and 10),unique(entry_id,slot));
+create table if not exists system_settings(key text primary key,value jsonb not null default '{}'::jsonb);
+create table if not exists audit_log(id uuid primary key default gen_random_uuid(),actor_id uuid references profiles(id) on delete set null,action text not null,entity_type text not null,entity_id uuid,previous_value jsonb,new_value jsonb,created_at timestamptz not null default now());
+
+create index if not exists timetable_entries_version_idx on timetable_entries(version_id);
+create index if not exists timetable_entries_day_idx on timetable_entries(day,start_slot);
+create index if not exists timetable_entries_course_idx on timetable_entries(course_id);
+create index if not exists timetable_entries_faculty_idx on timetable_entries(faculty_id);
+create index if not exists timetable_entries_section_idx on timetable_entries(section_id);
+
+alter table timetable_entries drop constraint if exists timetable_entries_teacher_no_overlap;
+alter table timetable_entries add constraint timetable_entries_teacher_no_overlap exclude using gist (faculty_id with =, day with =, slot_range with &&);
+alter table timetable_entries drop constraint if exists timetable_entries_section_no_overlap;
+alter table timetable_entries add constraint timetable_entries_section_no_overlap exclude using gist (section_id with =, day with =, slot_range with &&);
+alter table timetable_entries drop constraint if exists timetable_entries_room_no_overlap;
+alter table timetable_entries add constraint timetable_entries_room_no_overlap exclude using gist (room_id with =, day with =, slot_range with &&) where (room_id is not null);
+alter table timetable_entries drop constraint if exists timetable_entries_lab_no_overlap;
+alter table timetable_entries add constraint timetable_entries_lab_no_overlap exclude using gist (lab_id with =, day with =, slot_range with &&) where (lab_id is not null);
+
+create or replace function public.is_admin_or_committee() returns boolean language sql security definer set search_path=public as $$ select exists(select 1 from profiles where id=auth.uid() and role in ('admin','committee') and active) $$;
+create or replace function public.is_admin() returns boolean language sql security definer set search_path=public as $$ select exists(select 1 from profiles where id=auth.uid() and role='admin' and active) $$;
+
+alter table profiles enable row level security; alter table faculty enable row level security; alter table programs enable row level security; alter table semesters enable row level security; alter table sections enable row level security; alter table rooms enable row level security; alter table labs enable row level security; alter table courses enable row level security; alter table course_teacher_assignments enable row level security; alter table faculty_preferences enable row level security; alter table timetable_versions enable row level security; alter table timetable_entries enable row level security; alter table timetable_entry_slots enable row level security; alter table system_settings enable row level security; alter table audit_log enable row level security;
+
+do $$ declare t text; begin foreach t in array array['faculty','programs','semesters','sections','rooms','labs','courses','course_teacher_assignments','faculty_preferences','timetable_versions','timetable_entries','timetable_entry_slots','system_settings','audit_log'] loop execute format('drop policy if exists %I_read on %I',t,t); execute format('create policy %I_read on %I for select to authenticated using (true)',t,t); execute format('drop policy if exists %I_write on %I',t,t); execute format('create policy %I_write on %I for all to authenticated using (public.is_admin_or_committee()) with check (public.is_admin_or_committee())',t,t); end loop; end $$;
+drop policy if exists profiles_read on profiles; create policy profiles_read on profiles for select to authenticated using (id=auth.uid() or public.is_admin());
+drop policy if exists profiles_admin on profiles; create policy profiles_admin on profiles for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+create or replace function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$ begin insert into public.profiles(id,full_name,role) values(new.id,coalesce(new.raw_user_meta_data->>'full_name',''), 'teacher') on conflict(id) do nothing; return new; end $$;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
+
+insert into programs(name) values ('BS Computer Science'),('BS BioTec'),('BS Zoology'),('MLT'),('Food Science'),('Poultry') on conflict(name) do nothing;
+insert into rooms(name,capacity) values ('Room 1',40),('Room 2',40),('Marketing Room',35),('Conference Room',30) on conflict(name) do nothing;
+insert into labs(name,capacity) values ('Lab 1',30),('Lab 2',30) on conflict(name) do nothing;
+insert into faculty(name,faculty_type,allocated_credit_hours,max_weekly_slots) values
+('Dr. Fareed Ahmad','DSCS',10,20),('Mr. Muhammad Zafar Iqbal Karmani','DSCS',17,20),('Mr. Anees Ahmad Zafar','DSCS',12,20),('Mr. Ali Raza Aslam','DSCS',18,20),('Ms. Hafsa Mehboob','DSCS',15,20),('Ms. Sofia','DSCS',15,20),('Mr. Shahid','Visiting',11,20),('Ms. Asia','Visiting',6,20),('Ms. Tahira','Visiting',9,20),('Mr. Abdullah','Visiting',4,20) on conflict(name) do update set faculty_type=excluded.faculty_type,allocated_credit_hours=excluded.allocated_credit_hours;
+
+insert into system_settings(key,value) values('scheduler', '{"max_consecutive_theory":3,"max_classes_per_day":5,"prefer_same_room":true,"allow_saturday":false,"allow_overload":false}'::jsonb) on conflict(key) do nothing;
