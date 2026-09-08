@@ -1,23 +1,33 @@
-# UVAS Conflict-Free Timetable System
+# UVAS Conflict-Free Timetable Management System
 
-Online timetable management system for the Department of Statistics and Computer Science, UVAS Ravi Campus Pattoki.
+For the Department of Statistics & Computer Science, UVAS Ravi Campus Pattoki.
 
-## Current architecture
-- Frontend: static HTML/CSS/JavaScript
-- Hosting: Netlify
-- Repository: GitHub
-- Persistent prototype data: browser localStorage
-- AI integration: prepared for Gemini through a secure Netlify Function
-
-## Core rules
-- 50-minute timetable slots
-- Theory sessions use 1 or 2 consecutive slots
-- Labs always use 3 consecutive slots (150 minutes)
-- Teacher, class, room and lab overlaps are rejected
-- Teacher unavailable slots are hard restrictions
-- Automatic scheduling never bypasses deterministic validation
+## Implemented
+- Dashboard and responsive interface
+- Master data for teachers, courses, classes, rooms/labs
+- Teacher unavailability management
+- Manual allocation and editing
+- Deterministic conflict validation
+- 50-minute timetable slots and protected breaks
+- Theory sessions of 1-2 slots
+- Labs fixed at 3 consecutive slots
+- Teacher, class, room and lab collision checks
+- Automatic timetable generation
+- Teacher workload and quality reports
+- CSV export and JSON backup/import
+- Print-ready timetable
+- Dark mode
+- Secure Gemini assistant through a Netlify Function
+- Supabase-ready relational schema in `supabase/schema.sql`
+- Netlify configuration in `netlify.toml`
 
 ## Deployment
-The project is designed for direct Netlify deployment from the `main` branch. No build command is required.
+Connect this GitHub repository to Netlify and deploy the `main` branch. No build command is required.
 
-For Gemini, set `GEMINI_API_KEY` as a Netlify environment variable. Never put the key in client-side JavaScript.
+Set `GEMINI_API_KEY` in Netlify environment variables to enable the AI assistant. Never place the API key in browser JavaScript.
+
+## Data architecture
+The current browser application works immediately with localStorage so the deployed prototype requires no database credentials. `supabase/schema.sql` provides the production database foundation for authenticated multi-user persistence.
+
+## Important production step
+Before institutional use, connect the UI data layer to Supabase, enable Row Level Security, configure authenticated roles, and migrate the browser data model to the SQL schema. This keeps the current prototype usable while avoiding hardcoded credentials.
