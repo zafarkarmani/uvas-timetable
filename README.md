@@ -8,7 +8,7 @@ Production-ready timetable management for **University of Veterinary & Animal Sc
 - Hosting/serverless API: Netlify
 - Source of truth: GitHub `main`
 - AI: Gemini through a Netlify Function only
-- Browser localStorage is not used as the production database
+- Browser localStorage is not the production database
 
 ## Core scheduling rules
 - Monday–Friday
@@ -18,15 +18,16 @@ Production-ready timetable management for **University of Veterinary & Animal Sc
 - Teacher, section, room and lab overlaps are rejected
 - Teacher unavailable slots are hard constraints
 - Final/locked entries cannot be changed by the generator
-- Manual, automatic and AI timetable actions use the same browser-side deterministic validator
-- PostgreSQL exclusion constraints additionally prevent overlapping teacher, section, room and lab records at database level
+- Manual, automatic and AI timetable actions use the same deterministic validator
+- PostgreSQL exclusion constraints provide a second database-level protection against overlaps
 
 ## Supabase setup
 1. Create a Supabase project.
 2. Open SQL Editor.
 3. Run `supabase/schema.sql` completely.
-4. In Supabase Authentication, create the first administrator account.
-5. After the user is created, run:
+4. Run `supabase/production_patch.sql` completely. This adds the Auth-to-faculty link and lets teachers edit only their own preference grid.
+5. In Supabase Authentication, create the first administrator account.
+6. Promote it to admin:
 
 ```sql
 update public.profiles
@@ -34,9 +35,17 @@ set role='admin', full_name='Timetable Administrator', active=true
 where id=(select id from auth.users where email='YOUR_ADMIN_EMAIL');
 ```
 
-6. Add additional users through Supabase Auth. New users start as `teacher`; an admin can promote the appropriate account to `committee` or `admin` in the `profiles` table.
+7. For a teacher account, link the Auth user to the faculty record:
 
-The SQL seed creates the 10 faculty records, six resources, BS Computer Science Semesters I/III/V sections, the requested semester-wise courses, and eligible teacher mappings for courses where the prompt provided multiple possible teachers. It does not make a final teacher assignment when eligibility is ambiguous.
+```sql
+update public.faculty
+set user_id=(select id from auth.users where email='teacher@example.com')
+where name='Teacher Name';
+```
+
+New Auth users start as `teacher`. Promote committee/admin accounts from the `profiles` table.
+
+The seed creates the 10 requested faculty records, four classrooms, two labs, BS Computer Science Semesters I/III/V sections, the requested semester-wise courses, and eligible teacher mappings where the prompt supplied alternatives. Ambiguous courses are not given a single guessed final teacher.
 
 ## Netlify environment variables
 Set these in Netlify Site configuration:
@@ -47,49 +56,44 @@ SUPABASE_ANON_KEY=
 GEMINI_API_KEY=
 ```
 
-`SUPABASE_ANON_KEY` is intentionally exposed to the browser through the small runtime configuration function and is protected by Supabase RLS. **Never expose `SUPABASE_SERVICE_ROLE_KEY` or `GEMINI_API_KEY` to browser code.** The service-role key is not required by this application.
+The anonymous Supabase key is safe for browser use when RLS is correctly enabled. Never expose `SUPABASE_SERVICE_ROLE_KEY` or `GEMINI_API_KEY` to browser code. The service-role key is not required by this project.
 
 ## Netlify deployment
-Connect this GitHub repository to Netlify and deploy the `main` branch. `netlify.toml` points Netlify to the static site and `netlify/functions`.
+Connect this GitHub repository to Netlify and deploy the `main` branch. `netlify.toml` configures the static publish directory and `netlify/functions`.
 
-Every commit to `main` can trigger a production deployment when GitHub integration is enabled in Netlify. Pull-request deploy previews can be enabled in Netlify.
+When Netlify GitHub integration is enabled, commits to `main` can trigger production deployments and pull requests can use deploy previews.
 
 ## Gemini assistant
-The browser calls `/.netlify/functions/gemini`. The function converts natural-language requests into strict JSON actions. It never receives permission to write directly to the database. The client resolves the action against current master data and sends any timetable mutation through the same hard-constraint validator.
+The browser calls `/.netlify/functions/gemini`. Gemini converts natural language into strict JSON actions. It cannot write timetable rows directly. The client resolves the action against current master data and validates any timetable mutation through the deterministic engine.
 
-Required secret:
-
-```env
-GEMINI_API_KEY=
-```
-
-## Course CSV template
-Use:
+## Course CSV
+Template:
 
 ```csv
 course_code,course_title,program,semester,credit_hours,theory_hours,lab_hours,teacher
 ```
 
-The importer supports quoted CSV fields, validates required columns, skips duplicate/unknown records, and creates eligible teacher assignments when the teacher exists.
+The importer supports quoted CSV fields, checks required columns, skips duplicate/unknown rows, and adds the supplied teacher as an eligible assignment when that faculty exists.
 
-## Initial workflow
-1. Configure Supabase and create the first admin.
-2. Configure Netlify environment variables.
-3. Open the deployed application and sign in.
-4. Review faculty, programs, sections, courses and eligible teachers.
-5. Enter teacher preferences: available, preferred, or unavailable.
-6. Create a draft timetable version.
-7. Generate a timetable.
-8. Review unscheduled sessions and suggested alternatives.
-9. Manually correct or lock confirmed entries.
-10. Validate, print or export the timetable.
+## Workflow
+1. Configure Supabase and create/promote the first admin.
+2. Run both SQL files.
+3. Configure Netlify environment variables.
+4. Sign in.
+5. Review faculty, programs, sections, courses and eligible teachers.
+6. Enter faculty preferred/available/unavailable periods.
+7. Create a draft timetable version.
+8. Generate the timetable.
+9. Review unscheduled sessions and alternatives.
+10. Manually schedule or lock confirmed entries.
+11. Validate, print or export.
 
 ## Roles
-- **Admin:** full management and user/role administration through Supabase.
+- **Admin:** full management and role administration through Supabase.
 - **Timetable Committee:** timetable/resource/course management, generation, locking and audit actions.
-- **Teacher:** view schedules and maintain availability/preferences; cannot edit the final timetable.
+- **Teacher:** view schedules and maintain own preferences; cannot edit the final timetable.
 
 ## Production notes
-Academic course codes and some teacher mappings supplied in the project brief were incomplete or ambiguous. Seed codes such as `PF-I` and `ML-V` are stable working identifiers, not claims about official UVAS catalog codes. Replace them with official codes before publication.
+Some official course codes were not supplied in the brief. Seed identifiers such as `PF-I` and `ML-V` are working identifiers only. Replace them with official UVAS codes before institutional publication.
 
-The scheduler is deterministic and preference-aware, but it is intentionally maintainable rather than a black-box optimizer. Hard constraints always win. The database exclusion constraints provide a second safety layer against race-condition overlaps.
+The scheduler is deterministic and preference-aware. Hard constraints always win over preferences or AI requests. The database exclusion constraints protect against race-condition overlaps as a second safety layer.
