@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UVAS Timetable Management System</title>
+  <meta name="description" content="Conflict-free timetable management system for UVAS Ravi Campus Pattoki." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div><strong>UVAS Timetable</strong><span> Ravi Campus Pattoki</span></div>
+    <button id="themeBtn" type="button">Toggle theme</button>
+  </header>
+  <main class="container">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Department of Statistics & Computer Science</p>
+        <h1>Timetable Management System</h1>
+        <p>Create, validate, and manage a conflict-free timetable.</p>
+      </div>
+      <div class="actions"><button id="addBtn">Add allocation</button><button id="clearBtn" class="secondary">Clear timetable</button></div>
+    </section>
+    <section class="stats">
+      <div><small>Allocations</small><strong id="allocationCount">0</strong></div>
+      <div><small>Conflicts</small><strong id="conflictCount">0</strong></div>
+      <div><small>Days used</small><strong id="daysCount">0</strong></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>Weekly timetable</h2><span id="status">Ready</span></div>
+      <div id="empty" class="empty">No allocations yet. Add your first course allocation.</div>
+      <div class="table-wrap"><table id="table"><thead><tr><th>Day</th><th>Time</th><th>Course</th><th>Teacher</th><th>Class</th><th>Room</th><th>Type</th><th></th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </main>
+  <dialog id="dialog"><form method="dialog" id="form"><h2>Add allocation</h2><label>Day<select name="day"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option></select></label><label>Time<select name="time"><option>08:00-08:50</option><option>08:50-09:40</option><option>09:40-10:30</option><option>10:50-11:40</option><option>11:40-12:30</option><option>12:30-01:20</option><option>01:40-02:30</option><option>02:30-03:20</option></select></label><label>Course<input name="course" required placeholder="e.g. Discrete Structures" /></label><label>Teacher<input name="teacher" required placeholder="Teacher name" /></label><label>Class<input name="className" required placeholder="BSCS Semester 1 A" /></label><label>Room<input name="room" required placeholder="C-101" /></label><label>Type<select name="type"><option>Theory</option><option>Lab</option></select></label><div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button value="default">Save allocation</button></div></form></dialog>
+  <script src="app.js"></script>
+</body>
+</html>
